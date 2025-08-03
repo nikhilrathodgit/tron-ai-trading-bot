@@ -14,7 +14,7 @@
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 ```
 tron-ai-trading-bot/
 │

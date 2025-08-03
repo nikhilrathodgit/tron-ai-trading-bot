@@ -1,0 +1,7 @@
+
+langchain
+openai
+ccxt
+tronpy
+python-dotenv
+pandas
