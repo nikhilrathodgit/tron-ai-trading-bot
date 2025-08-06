@@ -17,6 +17,18 @@ df['Signal'] = 0
 df.loc[df['SMA10'] > df['SMA30'], 'Signal'] = 1
 df.loc[df['SMA10'] < df['SMA30'], 'Signal'] = -1
 
-# Printing last 5 rows to check data looks correct
-print(df.tail())
+def get_latest_signal():
 
+    latest_signal = df['Signal'].iloc[-1]
+
+    if latest_signal == 1:
+
+        return "Buy"
+    
+    if latest_signal == -1:
+
+        return "Sell"
+    
+    else:
+
+        return "Null Trade"
