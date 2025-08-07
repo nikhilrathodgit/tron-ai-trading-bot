@@ -37,7 +37,7 @@ print("✅Trade logged:", res.data)
 
 # Simulating closing trade with PnL
 trade_id = res.data[0]["id"]
-exit_price = 40500 # arbitrary exit price for testing pnl calculator
+exit_price = 1000500 # arbitrary exit price for testing pnl calculator
 pnl = (exit_price - price) * 0.01
 print(f"🔹 Simulating trade exit at {exit_price}, PnL = {pnl}")
 
