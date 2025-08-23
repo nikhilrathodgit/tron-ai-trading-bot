@@ -1,11 +1,16 @@
 from langchain.agents import initialize_agent, load_tools
 from langchain_openai import OpenAI
 from langchain_openai import ChatOpenAI
+from supabase import create_client
 import os
 from dotenv import load_dotenv
 
 # Load environment variables from .env
 load_dotenv()
+
+print("🔹 Connecting to Supabase...")
+supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+print("✅ Connected to Supabase")
 
 api_key = os.getenv("OPENAI_API_KEY")
 

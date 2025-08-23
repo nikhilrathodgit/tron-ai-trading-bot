@@ -33,7 +33,7 @@ def get_last_5_trades(query: str = None):
     if not res.data:
         return "No trades found"
 
-    # Return in a simple readable format
+    # Returned in a simple readable format dd
     return "\n".join(
         [f"[{t['id']}] {t['action']} {t['amount']} @ {t['entry_price']}" for t in res.data]
     )

@@ -1,15 +1,21 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.20;
 
+/**
+ * Trade logger for demo / analytics.
+ * - TradeOpen increments an internal counter and emits the new tradeId.
+ * - TradeClosed now includes `sellAmount` to support partial closes downstream.
+ */
 contract TradeLogger {
     event TradeOpen(
         uint256 indexed tradeId,
         address indexed trader,
         address indexed tokenAddress,
+        string tokenSymbol,
         string strategy,
-        string action,          // "BUY" or "SELL"
-        uint256 entryPrice,     // integer (scaled or raw)
-        uint256 amount,         // token amount in smallest units (raw)
+        string action,
+        uint256 entryPrice,   // scaled by PRICE_SCALE
+        uint256 amount,       // base units (token decimals)
         uint256 timestamp
     );
 
@@ -17,8 +23,10 @@ contract TradeLogger {
         uint256 indexed tradeId,
         address indexed trader,
         address indexed tokenAddress,
-        uint256 exitPrice,      // integer (scaled or raw)
-        int256 pnl,             // signed PnL in quote units (scaled or raw)
+        string tokenSymbol,
+        uint256 exitPrice,    // scaled by PRICE_SCALE
+        int256  pnl,          // scaled by PRICE_SCALE
+        uint256 sellAmount,   // base units (token decimals)  <-- NEW
         uint256 timestamp
     );
 
@@ -26,16 +34,18 @@ contract TradeLogger {
 
     function logTradeOpen(
         address tokenAddress,
-        string memory strategy,
-        string memory action,
+        string calldata tokenSymbol,
+        string calldata strategy,
+        string calldata action,
         uint256 entryPrice,
         uint256 amount
     ) external {
-        tradeCounter++;
+        uint256 id = ++tradeCounter;
         emit TradeOpen(
-            tradeCounter,
+            id,
             msg.sender,
             tokenAddress,
+            tokenSymbol,
             strategy,
             action,
             entryPrice,
@@ -47,15 +57,19 @@ contract TradeLogger {
     function logTradeClosed(
         uint256 tradeId,
         address tokenAddress,
+        string calldata tokenSymbol,
         uint256 exitPrice,
-        int256 pnl
+        int256 pnl,
+        uint256 sellAmount
     ) external {
         emit TradeClosed(
             tradeId,
             msg.sender,
             tokenAddress,
+            tokenSymbol,
             exitPrice,
             pnl,
+            sellAmount,
             block.timestamp
         );
     }

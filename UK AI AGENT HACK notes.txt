@@ -1,0 +1,134 @@
+UK AI AGENT HACK
+
+defi products or payment infrastructure for TRON
+
+(ask for requirements)
+
+Avalanche
+
+AI-Powered Yield Optimizer
+
+similar to srees product
+
+thoughts to log trades on tronchain then use that data to log on supbase then have read-only LangChain SQL agent read over your own Supabase PostgreSQL DB to allow natural language analytics
+
+add feature so that if I want to trade I can type set limit order at X and buy amount Y and natural language interprets and executes after confirmation
+
+also if I wanna swap to usdt (basically just look at trojan and keep adding)
+
+add market sentiment agent (try specialise to tron)
+
+add on chain token analysis tool (checks holder distribution, and all of ther safety factors for buying a token)
+
+
+you want the TRON transaction to be the single source of truth,
+and then insert that confirmed trade into Supabase only after it’s on-chain.
+
+That’s actually cleaner for the competition because:
+
+The blockchain becomes the authoritative record.
+
+Supabase becomes a mirror for fast AI queries.
+
+If there’s a mismatch, Supabase can be rebuilt from the chain logs.
+
+2) Adapted listener: listener_to_supabase.py
+
+What it does (summary):
+
+Reads TradeOpen and TradeClosed events from TronGrid (Nile).
+
+Converts raw on‑chain integers to human units using:
+
+PRICE_SCALE (e.g., if you pass price * 1e6 when emitting)
+
+TOKEN_DECIMALS_DEFAULT and optional TOKEN_DECIMALS_MAP (JSON) for per‑token decimals
+
+Maintains one active position per token in open_trades:
+
+BUY: increases amount; updates weighted average entry price
+
+SELL: decreases amount; realized PnL = (sell_price - avg_entry_price) * sell_amount
+
+amount reaching 0 → row is deleted
+
+Writes every action to trade_history with avg_entry_price, avg_exit_price (for sells), and pnl.
+
+TradeClosed is treated as a SELL of the entire open amount for that token at exitPrice and records the event’s pnl if provided.
+
+okay i have finally completed my tasks of creating separate emitter and listener and also have an ai agent which can read and answer questions on the database. I want to longterm create a telegram interface to input buys and sells and then have this connect to the emit events with correct inputs either scraped onchain or inputted from the user interface (probs a mix of both) then use the logged trades from the deployed contract on chain data to use the listener to log the data to supabase at which point the user can use the telegram interface to query about their trade history. How are we doing so far in terms of progress and what do you think are the next steps and long term gameplan. I have about a week left but a lot of time so dont oversimplify anything because I want to win this hackathon.
+
+couple of things to consider. First of all I want the SMA signal generator outputting a signal for instance SMA10/SMA30 crossover occured 8 minutes ago. Now I understand this isn't really in the plan so may spend the next hour making an signal generating script on python which captures signals and puts the data into a supabase table to be interpretted by the langchain open query bot. Secondly once that is created. I want the signals to be outputted by the bot by for example me saying track TRX and the the TRX/USDT price is tracked and a supabase table is created to track the signals which is then connected already to the ai agent bot we already made. Then when a signal occurs, I want the tg bot to notify the user and ask if they want to buy/sell depending on their current positioning (this would be buy for a token not held when there is a buy signal and sell for a token held when there is a sell signal). I think the trading aspect could be simulated on nile testnet with a trx/usdt pair buying and selling creating txids which would be used as input for the emitter (SMA Signal generated: BUY or SELL
+
+USER INITIATES TRANSACTION WITH INPUTS: Amount, Strategy, Action
+
+Scrape data for entry/exit price
+
+calculate pnl if sell
+
+log the open/close trade)
+
+so the token amount could be calculated from the /buy 100USDT button on the telegram bot and the token amount would be 100/tokenprice which is scraped at the instance of the transaction and inputted into emit events.
+
+/ask show me my last 5 trades
+/ask what tokens am I subscribed to for signals
+/ask what was my last signal
+/ask show my open positions right now
+/ask what was my pnl this year and this week
+/ask what is my total pnl right now   (needs prices_latest + v_pnl_now)
+
+/search what is the price of this token (btc ada link) 
+/search what is rsi what is sma 
+/search what is a strategy i could implement using this bot 
+/search whats the volume on tron chain right now 
+
+so basically i want you to build a search tool tailored to these style of questions (trading crypto)
+Okay im going to give you a big patch/product to make so take a long time to deep research understand what im looking for and executing a solution.
+
+Here is the plan
+
+So far we have built all the backend functionality for a telegram bot which is great.
+
+Now I want the telegram UI to look amazing as this will impress the hackathon judges. 
+
+I want the bot to resemble the UI from successful bots like trojan on solana and maestro on ETH. The reason they are the number one used bots is because their user experience is so simple and elegant like the design is made for someone completely new to crypto.
+
+take a look here 
+
+https://t.me/helenus_trojanbot
+
+so first of all as this is a demo we will assume the bot only buys in usd so the button to buy $100 jusrt refers to the usd amount. 
+
+the /start menu should look something similar to this (i have attached a jpeg with buy sell positions settings help etc. Please look at the commands in the telegram bot file and make the startup menu simple to navigate. there shud be a signals button to go into everything to do with signals, there should be a rebuild button, and there should be an ai button which can break off into two buttons for ask and search. 
+
+for buys and sells ther should be buttons like $100, $200, $500, $1000, and then a button for token amount and button for $ amount inputs for example if a user wants to buy a specific amount. All this same functionality should be for sells too but remember on sells of onchain tokens, the user will need to confirm the token address. 
+
+I would like the positions button to trigger something that looks like this:
+
+GAGSTER (https://t.me/helenus_trojanbot?start=sellToken-8dgUbHppPrkE5b4dXo8yvL3jxNC5gd21w7GzrJSMpump) - 📈 (https://dexscreener.com/solana/8dgUbHppPrkE5b4dXo8yvL3jxNC5gd21w7GzrJSMpump?maker=GxgkLH3JdCari3UchbmFXPqULRpGuVasZSqw1Tzw9EUT&ref=trojan) - 7.7786 SOL ($2,007.29) [Hide] (https://t.me/helenus_trojanbot?start=hideToken-8dgUbHppPrkE5b4dXo8yvL3jxNC5gd21w7GzrJSMpump)
+8dgUbHppPrkE5b4dXo8yvL3jxNC5gd21w7GzrJSMpump
+• Price & MC: $0.001565 — $1.57M
+• Avg Entry: $0.0009925 — $992.51K
+• Balance: 1.28M (0.128%)
+• Buys: 5.045 SOL ($1,272.83) • (1 buys)
+• Sells: N/A • (0 sells)
+• PNL USD: +57.70% ($734.47) 🟩
+• PNL SOL: +54.19% (2.7336 SOL) 🟩
+PNL Card 🖼️ (https://t.me/helenus_trojanbot?start=genPnlC-8dgUbHppPrkE5b4dXo8yvL3jxNC5gd21w7GzrJSMpump)
+
+obviously this is for solana so ours would only be for usd and without the pnl card.
+
+for signals, it should lead to buttons: signal subscriptions make signal and signal alerts
+
+then signal subscriptions should output something very similar to the /ask bot when asking what are my subscriptions
+
+make signal should lead to a menu where the user first specifies the ticker (input), then the strategy by choosing from sma, rsi, or another button (just called it blank for now), then the fast and slow numbers should be chosen with inputs, then finally the timeframe should be chosen. Once confirmed an excecuted there should be a confirmation message that it has been added to signal subscriptions.
+
+and signal alerts button should show the signal alerts of the day
+
+and then have a think if there is anything else to implement. Everything should have a delete from button so delete signal subscription /rm etc and a refresh button especially for live pnl on postions output
+
+i have also upload all the files relevant to the project.
+
+
+

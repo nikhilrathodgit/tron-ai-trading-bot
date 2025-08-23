@@ -23,6 +23,8 @@ import os, sys, time, argparse, requests, json, hashlib
 from decimal import Decimal, getcontext, ROUND_HALF_UP
 from dotenv import load_dotenv
 from supabase import create_client
+import sys
+
 
 
 getcontext().prec = 50
@@ -52,6 +54,14 @@ def fetch_events(addr, key="", limit=200, fingerprint=None, **extra):
 # Address canonicalization
 
 _B58_ALPH = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+def _safe_emoji(e: str = "✅", fallback: str = "OK") -> str:
+    enc = (sys.stdout.encoding or "utf-8").lower()
+    try:
+        e.encode(enc, errors="strict")
+        return e
+    except Exception:
+        return fallback
 
 def _b58decode_check(s: str) -> bytes:
     """Base58Check decode (Bitcoin/Tron). Returns payload (no 4-byte checksum)."""
@@ -97,6 +107,13 @@ def tron_to_hex(addr: str) -> str:
 def load_env():
     load_dotenv()
     # allow either var name (yours uses NILE_CONTRACT_ADDRESS)
+    sym2addr = {}
+    try:
+        sym2addr = json.loads(os.getenv("TOKEN_SYMBOLS_MAP","{}"))
+    except Exception:
+        pass
+    
+
     contract = os.getenv("NILE_CONTRACT_ADDRESS") or os.getenv("CONTRACT_ADDRESS")
     cfg = {
         "contract": contract,
@@ -118,6 +135,39 @@ def load_env():
         if not cfg[k]:
             print(f"[ERR] Missing env: {k}", file=sys.stderr); sys.exit(1)
     return cfg
+
+# new: symbol -> base58 address
+SYMBOLS_MAP = json.loads(os.getenv("TOKEN_SYMBOLS_MAP", "{}"))
+
+def _addr_variants(b58: str) -> set[str]:
+    """Return base58 + hex(41..) + hex(20) + 0x forms (all lower/upper)."""
+    c = set()
+    if not b58:
+        return c
+    c |= {b58, b58.strip(), b58.upper(), b58.lower()}
+    try:
+        h41 = tron_to_hex(b58)  # lowercased '41...'
+        c |= {h41, h41.upper(), "0x"+h41, ("0x"+h41).upper()}
+        if h41.startswith("41") and len(h41) == 42:
+            h20 = h41[2:]
+            c |= {h20, h20.upper(), "0x"+h20, ("0x"+h20).upper()}
+    except Exception:
+        pass
+    return c
+
+# build reverse index: any address form -> SYMBOL
+ADDR2SYM = {}
+for sym, b58 in SYMBOLS_MAP.items():
+    for v in _addr_variants(b58):
+        ADDR2SYM[v] = sym.upper()
+
+def addr_to_symbol(addr_any: str) -> str | None:
+    """Accept base58 or hex; return 'TRX'/'ADA'/... or None."""
+    if not addr_any:
+        return None
+    a = addr_any.strip()
+    return ADDR2SYM.get(a) or ADDR2SYM.get(a.lower()) or ADDR2SYM.get(a.upper())
+
 
 def supabase_client(cfg) -> Client:
     return create_client(cfg["supabase_url"], cfg["supabase_key"])
@@ -155,13 +205,31 @@ def quant_amount(cfg, token_src: str, x: Decimal) -> Decimal:
 def is_zero_amount(cfg, token_src: str, x: Decimal) -> bool:
     return quant_amount(cfg, token_src, x) == Decimal("0")
 
+def save_aliases_for_open(sup, symbol: str, token_address: str):
+    """
+    Seed aliases for faster /sell resolution after a rebuild:
+    - symbol  -> canonical address
+    - address -> canonical address
+    Idempotent via upsert on primary-key 'alias'.
+    """
+    try:
+        if not symbol or not token_address:
+            return
+        sym_alias = {"alias": symbol.strip().lower(), "canonical_address": token_address}
+        addr_alias = {"alias": token_address.strip().lower(), "canonical_address": token_address}
+        sup.table("token_aliases").upsert(sym_alias, on_conflict="alias").execute()
+        sup.table("token_aliases").upsert(addr_alias, on_conflict="alias").execute()
+    except Exception as e:
+        # Non-fatal: alias seeding should never break ingestion
+        print(f"[alias] upsert failed: {e}")
+
 # Parsers for events
 
 def parse_tradeopen(ev, cfg):
     r = ev["result"]
     tok = r["tokenAddress"]
     price = to_price(cfg, r["entryPrice"])
-    amt = to_amount(cfg, tok, r["amount"])
+    amt   = to_amount(cfg, tok, r["amount"])
     token_db = tron_to_hex(tok) if cfg["addr_hex"] else tok
     return {
         "uid": event_uid(ev),
@@ -169,6 +237,7 @@ def parse_tradeopen(ev, cfg):
         "event_name": "TradeOpen",
         "trade_id": int(r["tradeId"]),
         "trader": r["trader"],
+        "token_symbol": r.get("tokenSymbol") or "UNKNOWN",  # <-- NEW: from chain
         "token_address": token_db,
         "token_src": tok,
         "strategy": r.get("strategy"),
@@ -182,20 +251,26 @@ def parse_tradeclosed(ev, cfg):
     r = ev["result"]
     tok = r["tokenAddress"]
     price = to_price(cfg, r["exitPrice"])
-    token_db = tron_to_hex(tok) if cfg["addr_hex"] else tok
     pnl = Decimal(int(r["pnl"])) / cfg["price_scale"]
+    token_db = tron_to_hex(tok) if cfg["addr_hex"] else tok
+    sell_amt_raw = r.get("sellAmount")
+    sell_amt = to_amount(cfg, tok, sell_amt_raw) if sell_amt_raw is not None else None
     return {
         "uid": event_uid(ev),
         "tx_id": ev.get("transaction_id"),
         "event_name": "TradeClosed",
         "trade_id": int(r["tradeId"]),
         "trader": r["trader"],
+        "token_symbol": r.get("tokenSymbol") or "UNKNOWN",  # <-- NEW: from chain
         "token_address": token_db,
         "token_src": tok,
         "price": price,
         "pnl": pnl,
+        "sell_amount": sell_amt,                              # Decimal or None
         "block_number": ev.get("block_number"),
     }
+
+
 
 
 # DB ops 
@@ -291,7 +366,12 @@ def sell_pnl(avg_entry_price: Decimal, sell_price: Decimal, sell_amount: Decimal
 # Apply events
 
 def apply_tradeopen(sup: Client, ev: dict, cfg):
+# Idempotency: if history already has this event_uid, skip everything.
+    if history_exists_by_uid(sup, ev["uid"]):
+        return
+
     token = ev["token_address"]
+    symbol = ev.get("token_symbol")
     action = ev["action"]
     price  = ev["price"]
     amt    = ev["amount"]
@@ -302,6 +382,7 @@ def apply_tradeopen(sup: Client, ev: dict, cfg):
     hist = {
         "trade_id_onchain": trade_id,
         "token_address": token,
+        "token_symbol": symbol,
         "action": action,
         "price": price,
         "amount": amt,
@@ -321,6 +402,7 @@ def apply_tradeopen(sup: Client, ev: dict, cfg):
             )
             upsert_open(sup, {
                 "token_address": token,
+                "token_symbol": symbol,
                 # keep the original opening trade id:
                 "trade_id_onchain": op.get("trade_id_onchain"),
                 "avg_entry_price": new_avg,
@@ -329,11 +411,13 @@ def apply_tradeopen(sup: Client, ev: dict, cfg):
                 "trader": ev.get("trader"),
                 "last_tx_id": ev.get("tx_id"),
             })
+            save_aliases_for_open(sup, symbol, token)
             hist["avg_entry_price"] = new_avg
         else:
             # first buy: set opening trade id
             upsert_open(sup, {
                 "token_address": token,
+                "token_symbol": symbol,
                 "trade_id_onchain": trade_id,   # <- only here
                 "avg_entry_price": price,
                 "amount": amt,
@@ -341,6 +425,8 @@ def apply_tradeopen(sup: Client, ev: dict, cfg):
                 "trader": ev.get("trader"),
                 "last_tx_id": ev.get("tx_id"),
             })
+            save_aliases_for_open(sup, symbol, token)
+
             hist["avg_entry_price"] = price
 
         # carry idempotency fields into history
@@ -350,54 +436,37 @@ def apply_tradeopen(sup: Client, ev: dict, cfg):
 
 
     if action == "SELL":
-        if not op or Decimal(str(op["amount"])) <= 0:
+            # Legacy compatibility: do NOT mutate open_trades here anymore.
+            # We only record to history so old 'open SELL' events won't break state.
             hist.update({"tx_id": ev.get("tx_id"), "event_uid": ev.get("uid")})
             insert_history_once(sup, hist)
             return
-        open_amt = Decimal(str(op["amount"]))
-        avg_entry = Decimal(str(op["avg_entry_price"]))
-        sell_amt  = min(amt, open_amt)
-        realized  = sell_pnl(avg_entry, price, sell_amt)
-        hist.update({
-            "avg_entry_price": avg_entry,
-            "avg_exit_price": price,
-            "amount": sell_amt,
-            "pnl": realized,
-            "tx_id": ev.get("tx_id"),
-            "event_uid": ev.get("uid"),
-        })
-        insert_history_once(sup, hist)
 
-        remaining = quant_amount(cfg, ev["token_src"], (open_amt - sell_amt))
-        if is_zero_amount(cfg, ev["token_src"], remaining):
-            delete_open(sup, token)
-        else:
-            upsert_open(sup, {
-                "token_address": token,
-                "trade_id_onchain": op.get("trade_id_onchain"),
-                "avg_entry_price": avg_entry,
-                "amount": remaining,
-                "strategy": ev.get("strategy") or op.get("strategy"),
-                "trader": ev.get("trader"),
-                "last_tx_id": ev.get("tx_id"),
-            })
 
-        return
+    return
 
 def apply_tradeclosed(sup: Client, ev: dict, cfg):
-    token = ev["token_address"]
-    close_price = ev["price"]
-    trade_id = ev["trade_id"]
-    pnl_ev = ev.get("pnl")
+    # Idempotency: if history already has this event_uid, skip everything.
+    if history_exists_by_uid(sup, ev["uid"]):
+        return
+    
+    token      = ev["token_address"]
+    symbol     = ev.get("token_symbol")
+    close_px   = ev["price"]
+    trade_id   = ev["trade_id"]
+    pnl_ev     = ev.get("pnl")
+    sell_amt   = ev.get("sell_amount")  # Decimal or None
 
     op = get_open(sup, token)
 
+    # Base history row
     hist = {
         "trade_id_onchain": trade_id,
         "token_address": token,
+        "token_symbol": symbol,
         "action": "SELL",
-        "price": close_price,
-        "avg_exit_price": close_price,
+        "price": close_px,
+        "avg_exit_price": close_px,
         "amount": Decimal("0"),
         "strategy": None,
         "avg_entry_price": None,
@@ -406,24 +475,59 @@ def apply_tradeclosed(sup: Client, ev: dict, cfg):
         "event_uid": ev.get("uid"),
     }
 
+    # No open position tracked — just log with provided sell_amt (if any)
     if not op or Decimal(str(op["amount"])) <= 0:
+        if sell_amt is not None:
+            hist["amount"] = sell_amt
         insert_history_once(sup, hist)
         return
 
-        # in apply_tradeclosed():
-    open_amt = quant_amount(cfg, ev["token_src"], Decimal(str(op["amount"]))) # safe now because the exact-close case won’t leave crumbs
+    open_amt  = Decimal(str(op["amount"]))
     avg_entry = Decimal(str(op["avg_entry_price"]))
-    realized  = sell_pnl(avg_entry, close_price, open_amt)
+
+    # Decide how much to close:
+    #   - prefer on-chain sell_amt
+    #   - else: full close
+    if sell_amt is None:
+        sell_amt = open_amt
+    else:
+        # hard clamp to [0, open_amt]
+        if sell_amt < 0:
+            sell_amt = Decimal("0")
+        if sell_amt > open_amt:
+            sell_amt = open_amt
+
+    # Quantize to token decimals (safety)
+    sell_amt  = quant_amount(cfg, ev["token_src"], sell_amt)
+    remaining = quant_amount(cfg, ev["token_src"], open_amt - sell_amt)
+    if remaining < 0:
+        remaining = Decimal("0")
+
+    realized = sell_pnl(avg_entry, close_px, sell_amt)
 
     hist.update({
-        "amount": open_amt,
+        "amount": sell_amt,
         "strategy": op.get("strategy"),
         "avg_entry_price": avg_entry,
         "pnl": pnl_ev if pnl_ev is not None else realized,
     })
-
     insert_history_once(sup, hist)
-    delete_open(sup, token)
+
+    if is_zero_amount(cfg, ev["token_src"], remaining):
+        delete_open(sup, token)
+    else:
+        upsert_open(sup, {
+            "token_address": token,
+            "token_symbol": symbol,
+            "trade_id_onchain": op.get("trade_id_onchain"),
+            "avg_entry_price": avg_entry,
+            "amount": remaining,
+            "strategy": op.get("strategy"),
+            "trader": op.get("trader"),
+            "last_tx_id": ev.get("tx_id"),
+        })
+
+
 
 
 # Run modes
@@ -461,7 +565,10 @@ def run_once(cfg):
             break
         pages += 1
 
-    print(f"✅ once: processed {total} events across {pages+1} page(s). Tables are up to date!")
+
+    mark = _safe_emoji("✅", "OK")
+    print(f"once: processed {total} events across {pages+1} page(s). Tables are up to date!")
+
 
 
 def tail(cfg, interval=5):
