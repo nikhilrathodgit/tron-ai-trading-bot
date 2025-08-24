@@ -1,6 +1,41 @@
-langchain
-openai
-ccxt
-tronpy
+# Core environment
 python-dotenv
+pydantic>=2
+loguru
+
+# Data handling
 pandas
+numpy
+sqlalchemy
+
+# Market data / exchanges
+ccxt
+
+# Blockchain / TRON
+tronpy
+requests
+
+# Database
+supabase
+httpx
+postgrest  # used indirectly by supabase
+gotrue
+storage3
+
+# AI / LLM agent
+openai
+langchain
+langchain-community
+langchain-openai
+
+# Messaging / Bot
+aiogram>=3.0
+python-telegram-bot>=21
+
+# Utilities
+asyncio
+decimal
+
+# Dev / Testing (optional)
+pytest
+jupyter
