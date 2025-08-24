@@ -93,32 +93,73 @@ A) Signal generator (SMA/RSI)
 bash
 Copy
 Edit
-python -m bot.signals.run --symbol TRX/USDT --interval 1m --sma_fast 10 --sma_slow 30 --rsi_len 14
-B) Telegram bot
+python sma_signal_generator.py --loop --interval 60
+
+B) Signal generator (SMA/RSI)
 bash
 Copy
 Edit
-python -m bot.telegram.run
+python rsi_signal_generator.py --loop --interval 30 
+
+C) Telegram bot
+bash
+Copy
+Edit
+python telegram_bot.py
+
+
 Commands:
 
-/track <symbol> — monitor a token
+## 📜 Commands
 
-/buy <symbol> $amount — simulate/execute buy
+- `/start` — show welcome menu and navigation buttons  
+- `/help` — quick overview of available commands  
 
-/sell <symbol> $amount — simulate/execute sell
+### Trading
+- `/buy SYMBOL AMOUNT` — buy tokens (e.g. `/buy TRX 100`)  
+- `/buy SYMBOL $AMOUNT` — buy by dollar value (e.g. `/buy TRX $200`)  
+- `/buy SYMBOL AMOUNT @ PRICE|market` — buy with manual or explicit price  
 
-/pnl — compute PnL
+- `/sell SYMBOL %` — sell by percent of position (e.g. `/sell TRX 50%`)  
+- `/sell SYMBOL AMOUNT` — sell token units (e.g. `/sell TRX 10`)  
+- `/sell SYMBOL $AMOUNT` — sell by dollar value (e.g. `/sell TRX $500`)  
+- `/sell SYMBOL ... @ PRICE|market` — sell with manual/explicit price  
+- `/confirmaddr ADDRESS` — confirm token address for a pending sell  
+- `/confirm0x ADDRESS` — alias of `/confirmaddr`  
 
-C) On-chain logger
+### Signals
+- `/cs TOKEN sma FAST SLOW TF [network]` — create SMA signal subscription  
+  e.g. `/cs ADA sma 10 30 1h`  
+- `/crsi TOKEN PERIOD TF [network]` — create RSI signal subscription  
+  e.g. `/crsi TRX 14 5m`  
+- `/ls` — list active subscriptions  
+- `/rm TOKEN sma FAST SLOW TF` — remove SMA subscription  
+- `/rmrsi TOKEN PERIOD TF` — remove RSI subscription  
+- `/rmconfirm ADDRESS` — confirm removal by token address  
+
+### Data & analytics
+- `/positions [SYMBOL]` — show open positions (all or specific token)  
+- `/refresh_prices` — refresh cached market prices  
+- `/ask QUESTION` — ask AI agent about trades/positions (e.g. `/ask last 5 trades`)  
+- `/search QUERY` — research prices, indicators, strategies, or market info  
+- `/ping` — test bot responsiveness  
+
+### Maintenance
+- `/rebuild` — prepare to wipe and rebuild trade history from chain events  
+- `/rebuild_confirm` — confirm and execute rebuild  
+
+
+D) On-chain logger
 bash
 Copy
 Edit
-python -m bot.tron.logger --mode live
-D) AI agent
+deploy soldity contract TradeLogger.sol on nile testnet
+
+E) AI agent
 bash
 Copy
 Edit
-python -m bot.agent.run
+python agent.py
 Examples:
 “show last 5 trades”, “current pnl by strategy”, “alert me when RSI < 30”.
 
